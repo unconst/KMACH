@@ -10,26 +10,27 @@ from loguru import logger
 import threading
 import time
 
-from model import Mach
+from moe_model import Mach
 from utils import TBLogger
+from utils import metagraph_summary
 from utils import next_run_prefix
 from utils import load_data_and_constants
 
-def run(hparams, components):
-    try:
+
+def run(hparams, run_prefix, tblogger, components):
+    for c in components:
+        c.start()
+    logger.info('Begin wait on main...')
+    running = True
+
+    while running:
         for c in components:
-            c.start()
-        logger.info('Begin wait on main...')
-        running = True
-        while running:
-            for c in components:
-                if c.running == False:
-                    running = False
-            time.sleep(5)
-    except:
-        logger.debug('tear down.')
-        for c in components:
-            c.stop()
+            if c.running == False:
+                running = False
+        metagraph_summary(components, tblogger, run_prefix, components[0].step, hparams)
+
+    for c in components:
+        c.stop()
 
 def main(hparams):
 
@@ -52,11 +53,14 @@ def main(hparams):
 
     # Connect components
     for i in range(hparams.n_components):
-        if i != 0:
-            components[i].set_child(components[i-1])
+        components[i].set_children(components[:i] + components[i+1:])
+
+    # metagraph logger
+    logdir = hparams.log_dir + "/" + run_prefix + "/" + 'm'
+    tblogger = TBLogger(logdir)
 
     # Run experiment.
-    run(hparams, components)
+    run(hparams, run_prefix, tblogger, components)
 
 
 if __name__ == "__main__":
@@ -79,9 +83,14 @@ if __name__ == "__main__":
         help='Size of embedding between components. Default n_embedding=128')
     parser.add_argument(
         '--n_components',
-        default=2,
+        default=3,
         type=int,
         help='The number of training iterations. Default n_components=2')
+    parser.add_argument(
+        '--k',
+        default=2,
+        type=int,
+        help='Number to components to query. Default k=2')
     parser.add_argument(
         '--n_iterations',
         default=10000,
